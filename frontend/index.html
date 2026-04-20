@@ -3,41 +3,54 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>AgentOS</title>
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' rx='20' fill='%236c63ff'/><text y='.9em' font-size='70' x='15' fill='white'>A</text></svg>" />
+    <title>CAKE — Silicon Workforce OS</title>
+    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' fill='%23060610'/><text y='.88em' font-size='72' x='10' fill='%23a8ff3e'>⬡</text></svg>" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet" />
     <script src="https://cdn.tailwindcss.com"></script>
     <script>
       tailwind.config = {
         theme: {
           extend: {
             colors: {
-              bg: '#0f1117',
-              panel: '#1a1d27',
-              accent: '#6c63ff',
-              border: '#2a2d3e',
-              'status-active': '#22c55e',
-              'status-inactive': '#6b7280',
-              'activity-tool': '#3b82f6',
-              'activity-success': '#22c55e',
-              'activity-error': '#ef4444',
-              'activity-message': '#6b7280',
+              bg: '#060610',
+              surface: '#0b0b1a',
+              panel: '#0f0f22',
+              border: '#1a1a30',
+              lime: '#a8ff3e',
+              'lime-dim': '#6aaa1f',
+              amber: '#f5c518',
+              danger: '#ff3d3d',
+              blue: '#4a9eff',
+              muted: '#3a3a5c',
+              sub: '#5a5a7a',
+              text: '#d0d0e8',
+              bright: '#f0f0ff',
             },
             fontFamily: {
               sans: ['Inter', 'sans-serif'],
+              mono: ['JetBrains Mono', 'monospace'],
             },
           },
         },
       }
     </script>
     <style>
-      body { background-color: #0f1117; color: #e2e8f0; font-family: 'Inter', sans-serif; }
-      ::-webkit-scrollbar { width: 4px; }
-      ::-webkit-scrollbar-track { background: #1a1d27; }
-      ::-webkit-scrollbar-thumb { background: #2a2d3e; border-radius: 2px; }
-      ::-webkit-scrollbar-thumb:hover { background: #6c63ff; }
+      * { box-sizing: border-box; }
+      body { background: #060610; color: #d0d0e8; font-family: 'Inter', sans-serif; margin: 0; }
+      ::-webkit-scrollbar { width: 3px; height: 3px; }
+      ::-webkit-scrollbar-track { background: transparent; }
+      ::-webkit-scrollbar-thumb { background: #1a1a30; border-radius: 2px; }
+      ::-webkit-scrollbar-thumb:hover { background: #a8ff3e44; }
+      ::selection { background: #a8ff3e33; }
+      .lime-glow { box-shadow: 0 0 12px #a8ff3e33; }
+      .lime-dot { box-shadow: 0 0 6px #a8ff3e; }
+      .amber-dot { box-shadow: 0 0 6px #f5c518; }
+      .danger-dot { box-shadow: 0 0 6px #ff3d3d; }
+      .mono { font-family: 'JetBrains Mono', monospace; }
+      input, textarea, select { font-family: 'Inter', sans-serif; }
+      input:focus, textarea:focus, select:focus { outline: none; }
     </style>
   </head>
   <body>
