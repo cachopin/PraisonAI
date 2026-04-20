@@ -1,0 +1,35 @@
+Now let me think deeply about what this product IS before designing it — an operating system for a 1-person company, across any industry, powered by Silicon HR.
+
+Here's the complete interactive prototype — every screen is navigable. Let me walk you through what was built and why:
+
+---
+
+## The 8 Screens of CAKE
+
+**1. Command Center (Home)**
+The owner's daily briefing. No jargon. Shows what the agents *did for you* overnight — tasks completed, money collected, alerts. The single command bar lets any entrepreneur type a job in plain English and dispatch their entire company.
+
+**2. Workforce**
+The "HR roster" — every agent and every external collaborator in one view. Color-coded by health: green = thriving, amber = probation, red = terminated, gold = external human. Filterable. One click opens the agent profile.
+
+**3. Agent Profile**
+Five tabs per agent: Overview (vitals), Performance (ROI trend chart), DNA (what they've learned + where they fail), Knowledge (bricks they contributed), and Activity log. External collaborators get a simpler view: activity + access scope.
+
+**4. Hire Wizard**
+Zero code. The owner picks from plain-language suggestions or types what they need. CAKE surfaces a recommended role, explains what it will do, estimates cost, and confirms the hire in 3 steps. The barber, the consultant, and the factory owner all get the same experience.
+
+**5. Knowledge Vault**
+The organizational memory. Every brick ever extracted, searchable. Shows the "Org IQ Score" so the owner can see their company getting smarter over time. A simple explanation of how inheritance works — no technical language.
+
+**6. Collaborators (Guest Pass)**
+The external expert layer. A lawyer, accountant, or engineer gets a scoped invite — they see only what you allow. They can comment, approve, or assign tasks. They never touch the Vault or agent configs. This is the bridge between the silicon workforce and the human experts.
+
+**7. Reports**
+Automated intelligence delivered on schedule — weekly ops summary, monthly ROI sheet, fitness reports, vault growth. Plus a natural-language query bar: *"How much did agents cost last month?"*
+
+**8. Settings**
+Company profile, agent defaults (model, arena frequency, auto-fire threshold), notification channels (Slack, email), and a danger zone. One person can tune the entire org.
+
+---
+
+The aesthetic is deliberately **utilitarian luxury** — dark, precise, monospaced data points with electric lime as the "alive" signal. It should feel like a mission control, not a typical SaaS dashboard.
