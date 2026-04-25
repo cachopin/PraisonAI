@@ -262,3 +262,36 @@ def list_activity(agent_id: str, limit: int = 100) -> List[Dict]:
     for entry in reversed(entries):
         activity.extend(entry.get("activity", []))
     return activity[-limit:]
+
+
+# ----- key-value store -------------------------------------------------------
+
+KV_SCHEMA = """
+CREATE TABLE IF NOT EXISTS kv_store (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+"""
+
+
+def init_kv() -> None:
+    with get_conn() as conn:
+        conn.executescript(KV_SCHEMA)
+
+
+def kv_get(key: str) -> Optional[str]:
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT value FROM kv_store WHERE key = ?", (key,)
+        ).fetchone()
+    return dict(row)["value"] if row else None
+
+
+def kv_set(key: str, value: str) -> None:
+    now = _now()
+    with get_conn() as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO kv_store (key, value, updated_at) VALUES (?, ?, ?)",
+            (key, value, now),
+        )

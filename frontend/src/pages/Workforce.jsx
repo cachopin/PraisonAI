@@ -1,5 +1,8 @@
 import { useState, useMemo } from 'react'
 
+const API = '/api'
+const MODELS = ['gpt-4o-mini', 'gpt-4o', 'claude-3-haiku', 'claude-3-5-sonnet', 'gemini-1.5-flash']
+
 const STATUS_CFG = {
   active: { color: '#a8ff3e', bg: 'rgba(168,255,62,0.08)', label: 'ACTIVE', glow: 'lime-dot' },
   auditing: { color: '#f5c518', bg: 'rgba(245,197,24,0.08)', label: 'PROBATION', glow: 'amber-dot' },
@@ -7,8 +10,7 @@ const STATUS_CFG = {
 }
 
 function getDomain(agent) {
-  const n = agent.name.toLowerCase()
-  const ins = (agent.instructions || '').toLowerCase()
+  const n = agent.name.toLowerCase(), ins = (agent.instructions || '').toLowerCase()
   if (n.includes('research') || ins.includes('research')) return 'Research & Intelligence'
   if (n.includes('code') || n.includes('engineer') || ins.includes('code')) return 'Engineering'
   if (n.includes('finance') || n.includes('account') || ins.includes('finance')) return 'Finance & Ops'
@@ -16,8 +18,7 @@ function getDomain(agent) {
   if (n.includes('support') || n.includes('customer') || ins.includes('customer')) return 'Customer Success'
   if (n.includes('data') || n.includes('analyst') || ins.includes('data')) return 'Data & Analytics'
   if (n.includes('legal') || ins.includes('legal')) return 'Legal & Compliance'
-  const words = agent.name.split(' ').slice(0, 2).join(' ')
-  return words || 'General Ops'
+  return agent.name.split(' ').slice(0, 2).join(' ') || 'General Ops'
 }
 
 function getRecommendation(agent) {
@@ -29,221 +30,199 @@ function getRecommendation(agent) {
   return { text: 'Consider retraining', color: '#ff3d3d' }
 }
 
-export default function Workforce({ agents, onSelectAgent, onNavigate }) {
+export default function Workforce({ agents, onSelectAgent, onNavigate, onRefresh }) {
   const [selectedMgrId, setSelectedMgrId] = useState(null)
+  const [showAddDirector, setShowAddDirector] = useState(false)
+  const [showAddTask, setShowAddTask] = useState(null) // director id
 
-  // Build 3-tier hierarchy from parent_id relationships
-  const { ceoAgents, managerAgents, tasksByManager } = useMemo(() => {
-    const childrenMap = {}
-    agents.forEach(a => {
-      const pid = a.parent_id || '__root__'
-      if (!childrenMap[pid]) childrenMap[pid] = []
-      childrenMap[pid].push(a)
+  const directors = useMemo(() => agents.filter(a => !a.parent_id), [agents])
+  const tasksByDirector = useMemo(() => {
+    const map = {}
+    directors.forEach(d => { map[d.id] = [] })
+    agents.filter(a => a.parent_id).forEach(a => {
+      if (!map[a.parent_id]) map[a.parent_id] = []
+      map[a.parent_id].push(a)
     })
-
-    // Roots = no parent_id
-    const roots = (childrenMap['__root__'] || []).slice().sort((a, b) => a.generation - b.generation)
-
-    // If all agents are roots (no parent-child links exist), treat gen=1 as CEO-level summary,
-    // and show all agents as managers
-    const hasHierarchy = agents.some(a => a.parent_id)
-
-    if (hasHierarchy) {
-      // True hierarchy: roots are CEOs, their children are managers, grandchildren are tasks
-      const ceo = roots
-      const mgrs = []
-      const tasks = {}
-      ceo.forEach(c => {
-        const children = childrenMap[c.id] || []
-        children.forEach(mgr => {
-          mgrs.push(mgr)
-          tasks[mgr.id] = childrenMap[mgr.id] || []
-        })
-      })
-      // Agents with no parent but not CEO level → also managers
-      roots.forEach(r => {
-        if (!mgrs.find(m => m.id === r.id) && !ceo.find(c => c.id === r.id)) {
-          mgrs.push(r)
-          tasks[r.id] = childrenMap[r.id] || []
-        }
-      })
-      return { ceoAgents: ceo, managerAgents: mgrs, tasksByManager: tasks }
-    } else {
-      // Flat: show org-level CEO summary, all agents as managers
-      const tasks = {}
-      roots.forEach(r => { tasks[r.id] = [] })
-      return { ceoAgents: [], managerAgents: roots, tasksByManager: tasks }
-    }
-  }, [agents])
-
-  const selectedMgr = managerAgents.find(a => a.id === selectedMgrId)
-  const selectedTasks = selectedMgrId ? (tasksByManager[selectedMgrId] || []) : []
+    return map
+  }, [agents, directors])
 
   const activeCount = agents.filter(a => a.status === 'active').length
   const totalTokens = agents.reduce((s, a) => s + (a.token_spend || 0), 0)
   const avgScore = agents.length > 0
     ? (agents.reduce((s, a) => s + (a.performance_score || 0), 0) / agents.length).toFixed(1) : '—'
 
-  const hasHierarchy = agents.some(a => a.parent_id)
+  const handleDeleteDirector = async (director) => {
+    const taskCount = (tasksByDirector[director.id] || []).length
+    const msg = taskCount > 0
+      ? `Delete ${director.name} and their ${taskCount} task agent(s)? This cannot be undone.`
+      : `Delete director ${director.name}? This cannot be undone.`
+    if (!window.confirm(msg)) return
+    await fetch(`${API}/agents/${director.id}`, { method: 'DELETE' })
+    if (selectedMgrId === director.id) setSelectedMgrId(null)
+    onRefresh()
+  }
+
+  const handleDeleteTask = async (agent) => {
+    if (!window.confirm(`Delete task agent ${agent.name}?`)) return
+    await fetch(`${API}/agents/${agent.id}`, { method: 'DELETE' })
+    onRefresh()
+  }
 
   return (
     <div className="h-full overflow-y-auto" style={{ background: '#060610' }}>
       <div className="p-6">
-        {/* Header */}
         <div className="flex items-start justify-between mb-8">
           <div>
             <div className="font-mono text-xs tracking-widest mb-1" style={{ color: '#3a3a5c' }}>WORKFORCE · ORG CHART</div>
             <h1 className="text-2xl font-bold" style={{ color: '#f0f0ff' }}>Silicon HR Roster</h1>
-            <p className="text-sm mt-1" style={{ color: '#5a5a7a' }}>{agents.length} agent{agents.length !== 1 ? 's' : ''} across {hasHierarchy ? 'a hierarchy' : 'the fleet'}</p>
+            <p className="text-sm mt-1" style={{ color: '#5a5a7a' }}>
+              {directors.length} director{directors.length !== 1 ? 's' : ''} · {agents.filter(a => a.parent_id).length} task agents
+            </p>
           </div>
-          <button
-            onClick={() => onNavigate('hire')}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-mono font-bold tracking-wider transition-all hover:opacity-90"
-            style={{ background: '#a8ff3e', color: '#060610' }}
-          >
-            + HIRE AGENT
-          </button>
         </div>
 
-        {agents.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-24 text-center">
-            <div className="font-mono text-4xl mb-4" style={{ color: '#1a1a30' }}>∅</div>
-            <p className="text-sm mb-1" style={{ color: '#3a3a5c' }}>Your company has no agents yet.</p>
-            <button onClick={() => onNavigate('hire')} className="mt-4 text-xs font-mono" style={{ color: '#a8ff3e' }}>+ HIRE YOUR FIRST AGENT</button>
-          </div>
-        ) : (
-          <div className="flex flex-col items-center">
+        <div className="flex flex-col items-center">
 
-            {/* ── TIER 1: CEO / Org summary ── */}
-            <div className="w-full max-w-2xl mb-0">
-              {ceoAgents.length > 0 ? (
-                /* Actual root agents */
-                <div className="flex gap-4 justify-center">
-                  {ceoAgents.map(agent => (
-                    <CeoCard key={agent.id} agent={agent} onSelect={() => onSelectAgent(agent.id)} />
-                  ))}
-                </div>
-              ) : (
-                /* Flat org — show company-level summary */
-                <OrgSummaryCard
-                  agentCount={agents.length}
-                  activeCount={activeCount}
-                  avgScore={avgScore}
-                  totalTokens={totalTokens}
-                />
-              )}
+          {/* ── TIER 1: Org summary ── */}
+          <div className="w-full max-w-2xl">
+            <OrgSummaryCard agentCount={agents.length} activeCount={activeCount} avgScore={avgScore} totalTokens={totalTokens} />
+          </div>
+
+          {/* Connector */}
+          <div className="flex flex-col items-center" style={{ height: 40 }}>
+            <div className="w-px flex-1" style={{ background: 'linear-gradient(to bottom, #1a1a30, #2a2a44)' }} />
+            <div className="w-2 h-2 rounded-full" style={{ background: '#2a2a44' }} />
+          </div>
+
+          {/* ── TIER 2: Directors ── */}
+          <div className="w-full">
+            {/* Rail header */}
+            <div className="flex items-center gap-3 mb-4">
+              <div className="h-px flex-1" style={{ background: '#1a1a30' }} />
+              <span className="font-mono text-xs px-3 py-1 rounded-full" style={{ background: '#0b0b1a', border: '1px solid #1a1a30', color: '#5a5a7a', letterSpacing: '0.1em' }}>
+                DIRECTORS
+              </span>
+              <div className="h-px flex-1" style={{ background: '#1a1a30' }} />
             </div>
 
-            {/* Connector line down */}
-            {managerAgents.length > 0 && (
-              <div className="flex flex-col items-center my-0" style={{ height: 40 }}>
-                <div className="w-px flex-1" style={{ background: 'linear-gradient(to bottom, #1a1a30, #2a2a44)' }} />
-                <div className="w-2 h-2 rounded-full" style={{ background: '#2a2a44' }} />
+            {directors.length === 0 ? (
+              <div className="rounded-xl p-8 text-center" style={{ background: '#0b0b1a', border: '1px dashed #1a1a30' }}>
+                <p className="text-sm mb-3" style={{ color: '#3a3a5c' }}>No directors hired yet.</p>
+                <button onClick={() => setShowAddDirector(true)} className="text-xs font-mono" style={{ color: '#a8ff3e' }}>+ ADD YOUR FIRST DIRECTOR</button>
+              </div>
+            ) : (
+              <div className="flex gap-4 flex-wrap justify-center">
+                {directors.map(agent => (
+                  <DirectorCard
+                    key={agent.id}
+                    agent={agent}
+                    selected={selectedMgrId === agent.id}
+                    taskCount={(tasksByDirector[agent.id] || []).length}
+                    onToggle={() => setSelectedMgrId(selectedMgrId === agent.id ? null : agent.id)}
+                    onOpenProfile={() => onSelectAgent(agent.id)}
+                    onDelete={() => handleDeleteDirector(agent)}
+                  />
+                ))}
+
+                {/* Add director button */}
+                <button
+                  onClick={() => setShowAddDirector(true)}
+                  className="rounded-xl flex flex-col items-center justify-center gap-2 transition-all hover:border-lime-dim"
+                  style={{ width: 220, minHeight: 180, background: 'transparent', border: '1px dashed #1a1a30' }}
+                >
+                  <div className="w-8 h-8 rounded-full flex items-center justify-center" style={{ background: '#0b0b1a', border: '1px solid #1a1a30', color: '#3a3a5c', fontSize: 18 }}>+</div>
+                  <span className="font-mono text-xs" style={{ color: '#3a3a5c' }}>ADD DIRECTOR</span>
+                </button>
               </div>
             )}
+          </div>
 
-            {/* ── TIER 2: Managers ── */}
-            {managerAgents.length > 0 && (
+          {/* ── TIER 3: Task agents panel ── */}
+          {selectedMgrId && (() => {
+            const mgr = directors.find(d => d.id === selectedMgrId)
+            const tasks = tasksByDirector[selectedMgrId] || []
+            return mgr ? (
               <>
-                {/* Horizontal rail */}
-                <div className="relative w-full flex justify-center">
-                  {/* The horizontal connecting line across managers */}
-                  {managerAgents.length > 1 && (
-                    <div className="absolute top-0 h-px" style={{
-                      background: '#1a1a30',
-                      left: `calc(50% - ${Math.min(managerAgents.length, 4) * 10}%)`,
-                      right: `calc(50% - ${Math.min(managerAgents.length, 4) * 10}%)`,
-                    }} />
-                  )}
-
-                  <div className="flex gap-4 flex-wrap justify-center pt-0">
-                    {managerAgents.map(agent => (
-                      <div key={agent.id} className="flex flex-col items-center">
-                        {/* Connector stub up */}
-                        <div className="w-px mb-0" style={{ height: 0, background: '#1a1a30' }} />
-                        <ManagerCard
-                          agent={agent}
-                          selected={selectedMgrId === agent.id}
-                          taskCount={tasksByManager[agent.id]?.length || 0}
-                          onSelect={() => setSelectedMgrId(selectedMgrId === agent.id ? null : agent.id)}
-                          onOpenProfile={() => onSelectAgent(agent.id)}
-                        />
-                      </div>
+                <div className="flex flex-col items-center" style={{ height: 32 }}>
+                  <div className="w-px flex-1" style={{ background: '#1a1a30' }} />
+                  <div className="w-1.5 h-1.5 rounded-full" style={{ background: '#1a1a30' }} />
+                </div>
+                <div className="w-full">
+                  <div className="flex items-center gap-3 mb-3">
+                    <div className="h-px flex-1" style={{ background: '#1a1a30' }} />
+                    <span className="font-mono text-xs px-3 py-1 rounded-full" style={{ background: '#0b0b1a', border: '1px solid #1a1a30', color: '#5a5a7a', letterSpacing: '0.1em' }}>
+                      {mgr.name.toUpperCase()} · TASK AGENTS
+                    </span>
+                    <div className="h-px flex-1" style={{ background: '#1a1a30' }} />
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                    {tasks.map(task => (
+                      <TaskCard key={task.id} agent={task} onSelect={() => onSelectAgent(task.id)} onDelete={() => handleDeleteTask(task)} />
                     ))}
+                    <button
+                      onClick={() => setShowAddTask(selectedMgrId)}
+                      className="rounded-xl flex flex-col items-center justify-center gap-2 transition-all"
+                      style={{ minHeight: 140, background: 'transparent', border: '1px dashed #1a1a30' }}
+                    >
+                      <div className="w-7 h-7 rounded-full flex items-center justify-center" style={{ background: '#0b0b1a', border: '1px solid #1a1a30', color: '#3a3a5c', fontSize: 16 }}>+</div>
+                      <span className="font-mono text-xs" style={{ color: '#3a3a5c' }}>HIRE TASK AGENT</span>
+                    </button>
                   </div>
                 </div>
-
-                {/* ── TIER 3: Task agents (expandable) ── */}
-                {selectedMgr && (
-                  <>
-                    {/* Connector down from selected manager */}
-                    <div className="flex flex-col items-center" style={{ height: 32 }}>
-                      <div className="w-px flex-1" style={{ background: '#1a1a30' }} />
-                      <div className="w-1.5 h-1.5 rounded-full" style={{ background: '#1a1a30' }} />
-                    </div>
-
-                    <div className="w-full max-w-4xl">
-                      {/* Task panel header */}
-                      <div className="flex items-center gap-3 mb-3">
-                        <div className="h-px flex-1" style={{ background: '#1a1a30' }} />
-                        <span className="font-mono text-xs px-3 py-1 rounded-full" style={{ background: '#0b0b1a', border: '1px solid #1a1a30', color: '#5a5a7a', letterSpacing: '0.1em' }}>
-                          {selectedMgr.name.toUpperCase()} · DIRECT REPORTS
-                        </span>
-                        <div className="h-px flex-1" style={{ background: '#1a1a30' }} />
-                      </div>
-
-                      {selectedTasks.length === 0 ? (
-                        <div className="rounded-xl p-6 text-center" style={{ background: '#0b0b1a', border: '1px dashed #1a1a30' }}>
-                          <p className="text-sm mb-1" style={{ color: '#3a3a5c' }}>No task agents assigned to {selectedMgr.name} yet.</p>
-                          <button
-                            onClick={() => onNavigate('hire')}
-                            className="text-xs font-mono mt-2"
-                            style={{ color: '#a8ff3e' }}
-                          >
-                            + HIRE A REPORT FOR THIS MANAGER
-                          </button>
-                        </div>
-                      ) : (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-                          {selectedTasks.map(task => (
-                            <TaskAgentCard key={task.id} agent={task} onSelect={() => onSelectAgent(task.id)} />
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  </>
-                )}
               </>
-            )}
-          </div>
-        )}
+            ) : null
+          })()}
+        </div>
       </div>
+
+      {/* Add Director Modal */}
+      {showAddDirector && (
+        <AddAgentModal
+          title="ADD DIRECTOR"
+          subtitle="Directors own a department, build strategy, and manage task agents."
+          parentId={null}
+          generation={1}
+          onClose={() => setShowAddDirector(false)}
+          onCreated={(agent) => { onRefresh(); setShowAddDirector(false) }}
+        />
+      )}
+
+      {/* Add Task Agent Modal */}
+      {showAddTask && (
+        <AddAgentModal
+          title="HIRE TASK AGENT"
+          subtitle={`A focused agent under ${directors.find(d => d.id === showAddTask)?.name || 'this director'}.`}
+          parentId={showAddTask}
+          generation={2}
+          onClose={() => setShowAddTask(null)}
+          onCreated={(agent) => { onRefresh(); setShowAddTask(null) }}
+        />
+      )}
     </div>
   )
 }
 
-/* ─── CEO / Org Summary Cards ──────────────────────────────────── */
-
+/* ── Org Summary ─────────────────────────────────────────────────── */
 function OrgSummaryCard({ agentCount, activeCount, avgScore, totalTokens }) {
   return (
-    <div className="rounded-2xl p-5 w-full" style={{ background: '#0b0b1a', border: '1px solid #1a1a30' }}>
+    <div className="rounded-2xl p-5" style={{ background: '#0b0b1a', border: '1px solid #1a1a30' }}>
       <div className="flex items-start justify-between mb-4">
         <div>
           <div className="font-mono text-xs tracking-widest mb-1" style={{ color: '#3a3a5c' }}>CHIEF EXECUTIVE · YOUR COMPANY</div>
           <h2 className="text-lg font-bold" style={{ color: '#f0f0ff' }}>Owner</h2>
-          <p className="text-xs mt-0.5" style={{ color: '#5a5a7a' }}>You have full visibility and control</p>
+          <p className="text-xs mt-0.5" style={{ color: '#5a5a7a' }}>Full visibility and control over the silicon workforce</p>
         </div>
-        <div className="w-10 h-10 rounded-xl flex items-center justify-center font-mono font-bold text-sm" style={{ background: 'rgba(168,255,62,0.1)', border: '1px solid rgba(168,255,62,0.2)', color: '#a8ff3e' }}>CEO</div>
+        <div className="w-10 h-10 rounded-xl flex items-center justify-center font-mono font-bold text-sm shrink-0" style={{ background: 'rgba(168,255,62,0.1)', border: '1px solid rgba(168,255,62,0.2)', color: '#a8ff3e' }}>CEO</div>
       </div>
       <div className="grid grid-cols-4 gap-3">
         {[
-          { label: 'FLEET SIZE', value: agentCount, color: '#f0f0ff' },
-          { label: 'ON DUTY', value: activeCount, color: '#a8ff3e' },
+          { label: 'FLEET', value: agentCount, color: '#f0f0ff' },
+          { label: 'ACTIVE', value: activeCount, color: '#a8ff3e' },
           { label: 'AVG SCORE', value: avgScore, color: '#4a9eff' },
-          { label: 'TOKENS SPENT', value: totalTokens >= 1000 ? `${(totalTokens / 1000).toFixed(1)}k` : totalTokens, color: '#f5c518' },
+          { label: 'TOKENS', value: totalTokens >= 1000 ? `${(totalTokens / 1000).toFixed(1)}k` : totalTokens, color: '#f5c518' },
         ].map(s => (
           <div key={s.label}>
-            <div className="font-mono text-xs mb-1" style={{ color: '#3a3a5c', fontSize: '10px', letterSpacing: '0.08em' }}>{s.label}</div>
+            <div className="font-mono mb-1" style={{ color: '#3a3a5c', fontSize: '10px', letterSpacing: '0.08em' }}>{s.label}</div>
             <div className="font-mono text-xl font-bold" style={{ color: s.color }}>{s.value}</div>
           </div>
         ))}
@@ -252,33 +231,16 @@ function OrgSummaryCard({ agentCount, activeCount, avgScore, totalTokens }) {
   )
 }
 
-function CeoCard({ agent, onSelect }) {
-  const s = STATUS_CFG[agent.status] || STATUS_CFG.active
-  return (
-    <div className="rounded-2xl p-5 min-w-64" style={{ background: '#0b0b1a', border: `1px solid ${s.color}33` }}>
-      <div className="flex items-center justify-between mb-3">
-        <span className="font-mono text-xs tracking-widest" style={{ color: '#3a3a5c' }}>CHIEF EXECUTIVE</span>
-        <div className={`w-2 h-2 rounded-full ${s.glow}`} style={{ background: s.color }} />
-      </div>
-      <h3 className="text-lg font-bold mb-0.5" style={{ color: '#f0f0ff' }}>{agent.name}</h3>
-      <p className="text-xs font-mono mb-3" style={{ color: '#3a3a5c' }}>{agent.model}</p>
-      <button onClick={onSelect} className="text-xs font-mono" style={{ color: '#a8ff3e' }}>VIEW PROFILE →</button>
-    </div>
-  )
-}
-
-/* ─── Manager Card ──────────────────────────────────────────────── */
-
-function ManagerCard({ agent, selected, taskCount, onSelect, onOpenProfile }) {
+/* ── Director Card ───────────────────────────────────────────────── */
+function DirectorCard({ agent, selected, taskCount, onToggle, onOpenProfile, onDelete }) {
   const s = STATUS_CFG[agent.status] || STATUS_CFG.active
   const domain = getDomain(agent)
   const rec = getRecommendation(agent)
-  const budget = agent.token_spend || 0
 
   return (
     <div
-      onClick={onSelect}
-      className="rounded-xl cursor-pointer transition-all"
+      onClick={onToggle}
+      className="rounded-xl cursor-pointer transition-all relative group"
       style={{
         background: selected ? 'rgba(168,255,62,0.04)' : '#0b0b1a',
         border: `1px solid ${selected ? 'rgba(168,255,62,0.3)' : '#1a1a30'}`,
@@ -286,46 +248,41 @@ function ManagerCard({ agent, selected, taskCount, onSelect, onOpenProfile }) {
         boxShadow: selected ? '0 0 20px rgba(168,255,62,0.08)' : 'none',
       }}
     >
-      {/* Status stripe */}
-      <div className="h-0.5 rounded-t-xl" style={{ background: s.color }} />
+      {/* Delete button */}
+      <button
+        onClick={e => { e.stopPropagation(); onDelete() }}
+        className="absolute top-2 right-2 w-5 h-5 rounded flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity z-10"
+        style={{ background: 'rgba(255,61,61,0.1)', color: '#ff3d3d', fontSize: 12 }}
+        title="Delete director"
+      >×</button>
 
+      <div className="h-0.5 rounded-t-xl" style={{ background: s.color }} />
       <div className="p-4">
-        {/* Header row */}
         <div className="flex items-start justify-between mb-3">
           <div className={`w-2 h-2 rounded-full mt-0.5 ${s.glow}`} style={{ background: s.color }} />
           <span className="font-mono text-xs" style={{ color: '#1a1a30', letterSpacing: '0.08em' }}>GEN {agent.generation}</span>
         </div>
-
-        {/* Name + domain */}
         <h3 className="font-bold text-sm mb-0.5 truncate" style={{ color: '#f0f0ff' }}>{agent.name}</h3>
         <p className="text-xs font-mono mb-3 truncate" style={{ color: '#4a9eff' }}>{domain}</p>
-
-        {/* Data grid */}
         <div className="space-y-2 mb-3">
-          <DataRow label="BUDGET" value={`${budget.toLocaleString()} tk`} valueColor="#f0f0ff" />
-          <DataRow label="REPORTS" value={taskCount > 0 ? `${taskCount} agent${taskCount !== 1 ? 's' : ''}` : '—'} valueColor={taskCount > 0 ? '#f0f0ff' : '#3a3a5c'} />
-          <DataRow label="SCORE" value={agent.performance_score != null ? agent.performance_score.toFixed(1) : '—'} valueColor={agent.performance_score != null ? '#f0f0ff' : '#3a3a5c'} />
+          <DataRow label="BUDGET" value={`${(agent.token_spend || 0).toLocaleString()} tk`} />
+          <DataRow label="REPORTS" value={taskCount > 0 ? `${taskCount} agent${taskCount !== 1 ? 's' : ''}` : '—'} />
+          <DataRow label="SCORE" value={agent.performance_score != null ? agent.performance_score.toFixed(1) : '—'} />
         </div>
-
-        {/* Upward recommendation */}
-        <div className="pt-2 border-t" style={{ borderColor: '#1a1a30' }}>
-          <div className="font-mono text-xs mb-1" style={{ color: '#3a3a5c', fontSize: '10px', letterSpacing: '0.08em' }}>RECOMMENDATION</div>
+        <div className="pt-2 border-t mb-2" style={{ borderColor: '#1a1a30' }}>
+          <div className="font-mono mb-1" style={{ color: '#3a3a5c', fontSize: '10px', letterSpacing: '0.08em' }}>RECOMMENDATION</div>
           <p className="text-xs" style={{ color: rec.color }}>{rec.text}</p>
         </div>
-
-        {/* Actions */}
-        <div className="flex items-center gap-2 mt-3 pt-2 border-t" style={{ borderColor: '#1a1a30' }}>
+        <div className="flex items-center gap-2 pt-2 border-t" style={{ borderColor: '#1a1a30' }}>
           <button
             onClick={e => { e.stopPropagation(); onOpenProfile() }}
             className="text-xs font-mono transition-colors hover:opacity-70"
             style={{ color: '#5a5a7a' }}
-          >
-            PROFILE →
-          </button>
+          >PROFILE →</button>
           <div className="flex-1" />
           {taskCount > 0 && (
             <span className="text-xs font-mono" style={{ color: selected ? '#a8ff3e' : '#3a3a5c' }}>
-              {selected ? '▲ HIDE' : '▼ SHOW'} TEAM
+              {selected ? '▲' : '▼'} TEAM
             </span>
           )}
         </div>
@@ -334,50 +291,113 @@ function ManagerCard({ agent, selected, taskCount, onSelect, onOpenProfile }) {
   )
 }
 
-/* ─── Task Agent Card (tier 3) ──────────────────────────────────── */
-
-function TaskAgentCard({ agent, onSelect }) {
+/* ── Task Agent Card ─────────────────────────────────────────────── */
+function TaskCard({ agent, onSelect, onDelete }) {
   const s = STATUS_CFG[agent.status] || STATUS_CFG.active
   return (
-    <button
-      onClick={onSelect}
-      className="rounded-xl p-4 text-left w-full transition-all hover:border-opacity-60"
-      style={{ background: '#0b0b1a', border: '1px solid #1a1a30' }}
-    >
+    <div className="rounded-xl p-4 relative group" style={{ background: '#0b0b1a', border: '1px solid #1a1a30' }}>
+      <button
+        onClick={onDelete}
+        className="absolute top-2 right-2 w-5 h-5 rounded flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+        style={{ background: 'rgba(255,61,61,0.1)', color: '#ff3d3d', fontSize: 12 }}
+      >×</button>
       <div className="flex items-center gap-2 mb-2">
         <div className={`w-1.5 h-1.5 rounded-full ${s.glow}`} style={{ background: s.color }} />
         <span className="text-xs font-mono px-1.5 py-0.5 rounded" style={{ background: s.bg, color: s.color, fontSize: '10px' }}>{s.label}</span>
-        <span className="text-xs font-mono ml-auto" style={{ color: '#1a1a30' }}>GEN {agent.generation}</span>
       </div>
-      <p className="font-semibold text-sm truncate mb-1" style={{ color: '#f0f0ff' }}>{agent.name}</p>
-      <p className="text-xs font-mono mb-2 truncate" style={{ color: '#3a3a5c' }}>{agent.model}</p>
-      {agent.instructions && (
-        <p className="text-xs line-clamp-2" style={{ color: '#5a5a7a', lineHeight: 1.5 }}>{agent.instructions}</p>
-      )}
-      <div className="flex gap-3 mt-3 pt-2 border-t" style={{ borderColor: '#1a1a30' }}>
-        <StatMini label="SCORE" value={agent.performance_score != null ? agent.performance_score.toFixed(1) : '—'} />
-        <StatMini label="TOKENS" value={(agent.token_spend || 0).toLocaleString()} />
-      </div>
-    </button>
+      <button onClick={onSelect} className="text-left w-full">
+        <p className="font-semibold text-sm truncate mb-1" style={{ color: '#f0f0ff' }}>{agent.name}</p>
+        <p className="text-xs font-mono mb-2 truncate" style={{ color: '#3a3a5c' }}>{agent.model}</p>
+        {agent.instructions && <p className="text-xs line-clamp-2" style={{ color: '#5a5a7a', lineHeight: 1.5 }}>{agent.instructions}</p>}
+        <div className="flex gap-3 mt-3 pt-2 border-t" style={{ borderColor: '#1a1a30' }}>
+          <div>
+            <div className="font-mono" style={{ color: '#3a3a5c', fontSize: '10px' }}>SCORE</div>
+            <div className="font-mono text-sm font-bold" style={{ color: '#f0f0ff' }}>{agent.performance_score != null ? agent.performance_score.toFixed(1) : '—'}</div>
+          </div>
+          <div>
+            <div className="font-mono" style={{ color: '#3a3a5c', fontSize: '10px' }}>TOKENS</div>
+            <div className="font-mono text-sm font-bold" style={{ color: '#f0f0ff' }}>{(agent.token_spend || 0).toLocaleString()}</div>
+          </div>
+        </div>
+      </button>
+    </div>
   )
 }
 
-/* ─── Tiny helpers ──────────────────────────────────────────────── */
+/* ── Add Agent Modal ─────────────────────────────────────────────── */
+function AddAgentModal({ title, subtitle, parentId, generation, onClose, onCreated }) {
+  const [form, setForm] = useState({ name: '', instructions: '', model: 'gpt-4o-mini' })
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState('')
 
-function DataRow({ label, value, valueColor }) {
+  const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
+
+  const handleCreate = async () => {
+    if (!form.name.trim()) { setError('Name is required'); return }
+    setLoading(true)
+    setError('')
+    try {
+      const res = await fetch(`${API}/agents`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ...form, parent_id: parentId, generation }),
+      })
+      if (!res.ok) throw new Error(await res.text())
+      const agent = await res.json()
+      onCreated(agent)
+    } catch (e) {
+      setError(e.message)
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(6,6,16,0.88)' }}>
+      <div className="w-full max-w-md rounded-2xl overflow-hidden" style={{ background: '#0b0b1a', border: '1px solid #1a1a30' }}>
+        <div className="flex items-center justify-between px-6 py-4 border-b" style={{ borderColor: '#1a1a30' }}>
+          <div>
+            <div className="font-mono text-xs tracking-widest" style={{ color: '#3a3a5c' }}>{title}</div>
+            <p className="text-xs mt-0.5" style={{ color: '#5a5a7a' }}>{subtitle}</p>
+          </div>
+          <button onClick={onClose} className="text-lg" style={{ color: '#3a3a5c' }}>✕</button>
+        </div>
+        <div className="px-6 py-5 space-y-4">
+          <MField label="NAME">
+            <input value={form.name} onChange={e => set('name', e.target.value)} placeholder={parentId ? 'e.g. Outreach Specialist' : 'e.g. Head of Research'}
+              className="w-full px-3 py-2.5 rounded-lg text-sm" style={{ background: '#060610', border: '1px solid #1a1a30', color: '#d0d0e8', caretColor: '#a8ff3e' }} />
+          </MField>
+          <MField label="MODEL">
+            <select value={form.model} onChange={e => set('model', e.target.value)} className="w-full px-3 py-2.5 rounded-lg text-sm" style={{ background: '#060610', border: '1px solid #1a1a30', color: '#d0d0e8' }}>
+              {MODELS.map(m => <option key={m}>{m}</option>)}
+            </select>
+          </MField>
+          <MField label={parentId ? 'TASK INSTRUCTIONS (system prompt)' : 'DEPARTMENT INSTRUCTIONS'}>
+            <textarea value={form.instructions} onChange={e => set('instructions', e.target.value)}
+              placeholder={parentId ? 'What specific task does this agent handle? What skills? What output format?' : 'What is this director responsible for? What is their mandate?'}
+              rows={4} className="w-full px-3 py-2.5 rounded-lg text-sm resize-none" style={{ background: '#060610', border: '1px solid #1a1a30', color: '#d0d0e8', caretColor: '#a8ff3e' }} />
+          </MField>
+          {error && <p className="text-xs font-mono" style={{ color: '#ff3d3d' }}>{error}</p>}
+        </div>
+        <div className="flex gap-3 justify-end px-6 py-4 border-t" style={{ borderColor: '#1a1a30' }}>
+          <button onClick={onClose} className="px-4 py-2 rounded-lg text-xs font-mono" style={{ border: '1px solid #1a1a30', color: '#5a5a7a' }}>CANCEL</button>
+          <button onClick={handleCreate} disabled={loading} className="px-4 py-2 rounded-lg text-xs font-mono font-bold" style={{ background: '#a8ff3e', color: '#060610' }}>
+            {loading ? 'CREATING...' : 'CREATE'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function DataRow({ label, value }) {
   return (
     <div className="flex items-center justify-between">
-      <span className="font-mono text-xs" style={{ color: '#3a3a5c', fontSize: '10px', letterSpacing: '0.08em' }}>{label}</span>
-      <span className="font-mono text-xs font-bold" style={{ color: valueColor || '#f0f0ff' }}>{value}</span>
+      <span className="font-mono" style={{ color: '#3a3a5c', fontSize: '10px', letterSpacing: '0.08em' }}>{label}</span>
+      <span className="font-mono text-xs font-bold" style={{ color: '#f0f0ff' }}>{value}</span>
     </div>
   )
 }
 
-function StatMini({ label, value }) {
-  return (
-    <div>
-      <div className="font-mono text-xs" style={{ color: '#3a3a5c', fontSize: '10px', letterSpacing: '0.08em' }}>{label}</div>
-      <div className="font-mono text-sm font-bold" style={{ color: '#f0f0ff' }}>{value}</div>
-    </div>
-  )
+function MField({ label, children }) {
+  return <div><div className="font-mono text-xs mb-1.5" style={{ color: '#3a3a5c', letterSpacing: '0.1em' }}>{label}</div>{children}</div>
 }

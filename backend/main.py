@@ -1,11 +1,12 @@
 """AgentOS FastAPI backend."""
+import json as json_lib
 import os
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict
 
@@ -20,6 +21,7 @@ except ImportError:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     agentdb.init_db()
+    agentdb.init_kv()
     yield
 
 
@@ -188,6 +190,26 @@ def clear_history(agent_id: str):
 @app.get("/agents/{agent_id}/activity")
 def get_activity(agent_id: str):
     return agentdb.list_activity(agent_id, limit=100)
+
+
+# ── Key-Value store endpoints ─────────────────────────────────────────────
+
+@app.get("/kv/{key}")
+def kv_get_endpoint(key: str):
+    val = agentdb.kv_get(key)
+    if val is None:
+        return {}
+    try:
+        return json_lib.loads(val)
+    except Exception:
+        return {"value": val}
+
+
+@app.put("/kv/{key}")
+async def kv_set_endpoint(key: str, request: Request):
+    body = await request.json()
+    agentdb.kv_set(key, json_lib.dumps(body))
+    return body
 
 
 def _log(action_type: str, description: str) -> Dict:
